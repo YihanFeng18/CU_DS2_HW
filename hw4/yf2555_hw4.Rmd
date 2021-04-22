@@ -1,0 +1,265 @@
+---
+title: "Assignment 4"
+author: "Yihan Feng"
+date: "4/6/2021"
+output: pdf_document
+---
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(lasso2)
+library(ISLR)
+library(rpart)
+library(earth)
+library(rpart.plot)
+library(ISLR)
+library(mlbench)
+library(caret)
+library(party)
+library(partykit)
+library(plotmo)
+library(pROC)
+```
+
+
+### Problem 1
+```{r}
+data("Prostate")
+prostate.df = Prostate
+
+trRows = createDataPartition(prostate.df$lpsa,
+                             p = 0.75,
+                             list = FALSE)
+control1 = trainControl(method = "cv")
+
+```
+
+
+#### (a) Fit a regression tree with lpsa as the response and the other variables as predictors. Use cross-validation to determine the optimal tree size. Which tree size corresponds to the lowest cross-validation error? Is this the same as the tree size obtained using the 1 SE rule?
+
+```{r, fig.align = 'center'}
+set.seed(1)
+tree = rpart(lpsa ~ . ,
+              prostate.df)
+
+plotcp(tree)
+rpart.plot(tree)
+cpTable = tree$cptable
+minErr = which.min(cpTable[,4])
+
+tree.1se = prune(tree, cp = cpTable[cpTable[,4]<cpTable[minErr,4]+cpTable[minErr,5],1][1])
+rpart.plot(tree.1se)
+
+tree.min = prune(tree, cp = cpTable[minErr,1][1])
+
+```
+
+The tree size corresponds to the lowest cross-validation error is 8.
+The tree size corresponds to 1 SE rules is 3. 
+
+\newpage
+
+#### (b) Create a plot of the final tree you choose. Pick one of the terminal nodes, and interpret the information displayed.
+```{r, fig.align = 'center'}
+rpart.plot(tree.1se)
+```
+
+Interpretation:
+When the log lcavol is less than 2.5 and equal or greater than -0.48, the mean observation values of Lpsa in this terminal is 2.1. And this terminal nodes contains 78% of the training observations. 
+
+\newpage
+
+
+#### (c) Perform bagging and report the variable importance.
+```{r, fig.align = 'center'}
+set.seed(1)
+
+bagging.grid = expand.grid(mtry = 8,
+                           splitrule = "variance",
+                           min.node.size = 1:20)
+bagging = train(lpsa ~ . ,
+              prostate.df, 
+              subset = trRows,
+                method = "ranger",
+                tuneGrid = bagging.grid,
+                trControl = control1,
+                metric = "RMSE",
+                importance = "permutation")
+
+bagging$result[which.min(bagging$results[,5]),]
+
+barplot(sort(ranger::importance(bagging$finalModel), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
+```
+
+The importance from highest to lowest: lcavol, svi, lweight, lcp, pgg45, lbph, gleason, age
+
+\newpage
+
+
+#### (d) Perform random forest and report the variable importance.
+```{r, fig.align = 'center', message=FALSE, warning=FALSE}
+set.seed(1)
+
+rf.grid = expand.grid(mtry = 1:7,
+                      splitrule = "variance",
+                      min.node.size = 1:20)
+
+rf = train(lpsa ~ . ,
+              prostate.df, 
+              subset = trRows,
+           method = "ranger",
+           tuneGrid = rf.grid,
+           trControl = control1,
+           importance = "permutation")
+
+rf$result[which.min(rf$results[,5]),]
+
+barplot(sort(ranger::importance(rf$finalModel), decreasing = FALSE),
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
+```
+
+The importance from highest to lowest: lcavol, svi, lweight, lcp, pgg45, gleason, lbph, age
+
+\newpage
+
+
+#### (e) Perform boosting and report the variable importance.
+```{r, fig.align = 'center', message=FALSE, warning=FALSE}
+boosting.grid = expand.grid(n.trees = c(2000, 3000),
+                            interaction.depth = 1:5,
+                            shrinkage = seq(0.01, 0.05, len = 3),
+                            n.minobsinnode = 1:10)
+
+boosting = train(lpsa ~ . ,
+              prostate.df, 
+              subset = trRows,
+                 method = "gbm",
+                 tuneGrid = boosting.grid,
+                 trControl = control1,
+                 verbose = FALSE)
+summary(boosting$finalModel, 
+        las = 2,
+        cBars = 19,
+        cex.names = 0.6)
+
+```
+
+The importance from highest to lowest: lcavol, lweight, svi, age, lcp, lbph, pgg45, gleason
+
+
+
+#### (f) Which of the above models will you select to predict PSA level?
+```{r}
+resample = resamples(list(bagging = bagging,
+                          randomforest = rf,
+                          boosting = boosting))
+summary(resample)
+```
+
+I would choose boosting method, as it has the lowest mean and median for MAE and RMSE. 
+
+
+\newpage
+
+
+### Problem 2
+```{r}
+data("OJ")
+oj.df = OJ
+
+trRows.cl = createDataPartition(oj.df$Purchase,
+                             p = 0.75,
+                             list = FALSE)
+
+control = trainControl(method = "cv",
+                       summaryFunction = twoClassSummary,
+                       classProbs = TRUE)
+```
+
+\newpage
+
+
+
+#### (a) Fit a classification tree to the training set, with Purchase as the response and the other variables as predictors. Use cross-validation to determine the tree size and create a plot of the final tree. Predict the response on the test data. What is the test classification error rate?
+
+```{r, fig.align = 'center', message=FALSE, warning=FALSE}
+set.seed(1)
+cl.tree = train(Purchase ~ .,
+                oj.df, 
+                method = "rpart",
+                tuneGrid = data.frame(cp = exp(seq(-13, -6, len = 50))),                
+                trControl = control,
+                metric = "ROC"
+                )
+
+ggplot(cl.tree, highlight = TRUE)
+
+cl.tree.pred = predict(cl.tree, newdata = oj.df[-trRows.cl,])
+cl.tree.er = mean(cl.tree.pred != oj.df$Purchase[-trRows.cl])
+cl.tree.er
+```
+
+The error rate is `r round(cl.tree.er*100, 3)`%.
+
+\newpage
+
+
+#### (b) Perform random forest on the training set and report variable importance. What is the test error rate?
+```{r, fig.align = 'center', message=FALSE, warning=FALSE}
+set.seed(1)
+
+cl.rf.grid = expand.grid(mtry = 1:8,
+                         splitrule = "gini",
+                         min.node.size = 1:8)
+
+cl.rf = train(Purchase ~ .,
+              oj.df, 
+              subset = trRows.cl,
+              method = "ranger",
+              tuneGrid = cl.rf.grid,
+              metric = "ROC",
+              trControl = control)
+
+ggplot(cl.rf, highlight = TRUE)
+
+cl.rf.pred = predict(cl.rf, newdata = oj.df[-trRows.cl,])
+cl.rf.er = mean(cl.rf.pred != oj.df$Purchase[-trRows.cl])
+cl.rf.er
+```
+
+The error rate is `r round(cl.rf.er * 100, 3)`%. 
+
+\newpage
+
+
+
+#### (c) Perform boosting on the training set and report variable importance. What is the test error rate?
+```{r, fig.align = 'center', message=FALSE, warning=FALSE}
+set.seed(1)
+cl.boosting.grid = expand.grid(n.trees = c(2000, 3000, 4000),
+                               interaction.depth = 1:6,
+                               shrinkage = c(0.001, 0.003, 0.005),
+                               n.minobsinnode = 1)
+cl.boosting = train(Purchase ~ .,
+                    oj.df, 
+                    subset = trRows.cl,
+                    tuneGrid = cl.boosting.grid,
+                    trControl = control,
+                    method = "gbm",
+                    distribution = "adaboost",
+                    metric = "ROC",
+                    verbose = FALSE)
+
+ggplot(cl.boosting, highlight = TRUE)
+
+cl.boosting.pred = predict(cl.boosting, newdata = oj.df[-trRows.cl,])
+cl.boosting.er = mean(cl.boosting.pred != oj.df$Purchase[-trRows.cl])
+cl.boosting.er
+```
+
+The error rate is `r round(cl.boosting.er * 100, 3)`%. 

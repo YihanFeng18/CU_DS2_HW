@@ -1,0 +1,195 @@
+---
+title: "P8106 Assignment 2"
+author: "Yihan Feng"
+date: "2021/2/28"
+output: pdf_document
+---
+
+```{r include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+library(splines)
+library(mgcv)
+library(boot)
+library(ggplot2)
+library(pdp)
+library(earth)
+library(ggplot2)
+library(gam)
+library(tinytex)
+library(pdp)
+```
+
+```{r, data import, message=FALSE, warning=FALSE}
+setwd("C:/Users/irene/OneDrive - cumc.columbia.edu/2021 M1 Spring/Data Science 2/HW/hw2")
+college.df = read_csv("./College.csv") %>%
+  drop_na()
+```
+
+### (a) Perform exploratory data analysis (e.g., scatter plots of response vs. predictors).
+
+```{r}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.line$col <- rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+trellis.par.set(theme1)
+college.df %>%
+  dplyr::select(-Outstate, -College) %>%
+  featurePlot(., college.df$Outstate, plot = "scatter")
+```
+
+\newpage
+
+### (b) Fit smoothing spline models using Terminal as the only predictor of Outstate for a range of degrees of freedom, as well as the degree of freedom obtained by generalized cross-validation, and plot the resulting fits. Describe the results obtained.
+
+#### 1. set degree of freedom as 2
+```{r}
+fit.ss = smooth.spline(college.df$Terminal, college.df$Outstate, df = 2)
+fit.ss$df
+
+terminallims = range(college.df$Terminal)
+terminal.grid = seq(from = terminallims[1], to = terminallims[2])
+
+pred.ss = predict(fit.ss,
+                 x = terminal.grid)
+pred.ss.df = data.frame(pred = pred.ss$y,
+                        Terminal = terminal.grid)
+
+p.2 = ggplot(data = college.df, aes(x = Terminal, y = Outstate)) +
+      geom_point(color = "grey") + 
+      geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,
+                color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+<br>
+<br>
+
+#### 2. set degree of freedom as 10
+```{r}
+fit.ss = smooth.spline(college.df$Terminal, college.df$Outstate, df = 10)
+fit.ss$df
+
+pred.ss = predict(fit.ss,
+                 x = terminal.grid)
+pred.ss.df = data.frame(pred = pred.ss$y,
+                        Terminal = terminal.grid)
+
+p.10 = ggplot(data = college.df, aes(x = Terminal, y = Outstate)) +
+    geom_point(color = "grey") +
+    geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,
+              color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+<br>
+<br>
+
+#### 3. set degree of freedom as 20
+```{r}
+fit.ss = smooth.spline(college.df$Terminal, college.df$Outstate, df = 20)
+fit.ss$df
+
+pred.ss = predict(fit.ss,
+                 x = terminal.grid)
+pred.ss.df = data.frame(pred = pred.ss$y,
+                        Terminal = terminal.grid)
+
+p.20 = ggplot(data = college.df, aes(x = Terminal, y = Outstate)) +
+    geom_point(color = "grey") +
+    geom_line(aes(x = Terminal, y = pred), data = pred.ss.df,
+              color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+<br>
+<br>
+
+#### 4. degree of freedom obtained by generalized cross-validation. 
+```{r}
+fit.ss.cv = smooth.spline(college.df$Terminal, college.df$Outstate, cv = FALSE)
+fit.ss.cv$df
+
+pred.ss.cv = predict(fit.ss.cv,
+                 x = terminal.grid)
+pred.ss.df.cv = data.frame(pred = pred.ss.cv$y,
+                        Terminal = terminal.grid)
+
+p.cv = ggplot(data = college.df, aes(x = Terminal, y = Outstate)) +
+      geom_point(color = "grey") +
+      geom_line(aes(x = Terminal, y = pred), data = pred.ss.df.cv,
+                color = rgb(.8, .1, .1, 1)) + theme_bw()
+```
+
+
+```{r}
+ggpubr::ggarrange(p.2, p.cv, p.10, p.20,
+                  labels = c("DF = 2", "DF = 4.47", "DF = 10", "DF = 20"),
+                  ncol = 2, nrow = 2)
+```
+
+According to the three plots, when the degree of freedom is larger, the line is much wiggly; when the degree of freedom is smaller, the line tends to be linear. The degree of freedom obtained from cross-validation (`r fit.ss.cv$df`), shows a smooth curve. 
+
+\newpage
+
+### (c) Fit a generalized additive model (GAM) using all the predictors. Plot the results and explain your findings.
+
+```{r message=FALSE, warning=FALSE}
+x = model.matrix(Outstate ~ .,college.df)[,-1] 
+y = college.df$Outstate
+
+ctrl1 = trainControl(method = "cv", number = 10)
+set.seed(1)
+gam.fit = train(x, y,
+                method = "gam",
+                tuneGrid = data.frame(method = "GCV.Cp", 
+                                      select = c(TRUE,FALSE)), 
+                 trControl = ctrl1)
+gam.fit$bestTune
+gam.fit$finalModel
+```
+
+According to the final model: 
+
+```{r message=FALSE, warning=FALSE}
+plot(gam.fit$finalModel)
+```
+
+According to the final model, I found that the best model has "select = FALSE", and "method = GCV.Cp". And all predictors has the spline function. However, using the caret method, we may lose a significant amount of flexibility in `mgcv`, such as interactions. 
+
+\newpage
+
+### (d) Train a multivariate adaptive regression spline (MARS) model using all the predictors. Report the final model. Present the partial dependence plot of an arbitrary predictor in your final model.
+
+```{r message=FALSE, warning=FALSE}
+mars_grid <- expand.grid(degree = 1:4,
+                        nprune = 2:25)
+
+set.seed(1)
+
+mars.fit <- train(x, y,
+                  method = "earth",
+                  tuneGrid = mars_grid,
+                  trControl = ctrl1)
+
+ggplot(mars.fit)
+
+mars.fit$bestTune
+coef(mars.fit$finalModel)
+
+p1 = pdp::partial(mars.fit, pred.var = c("Personal"), 
+                  grid.resolution = 10) %>% 
+  autoplot()
+p2 <- pdp::partial(mars.fit, 
+                   pred.var = c("Personal", "Books"),
+                    grid.resolution = 10) %>%
+  pdp::plotPartial(levelplot = FALSE, 
+                   zlab = "yhat", 
+                   drape = TRUE,
+                   screen = list(z = 20, x = -60))
+
+grid.arrange(p1, p2, ncol = 2)
+
+resamp = resamples(list(mars = mars.fit,
+                 gam = gam.fit))
+summary(resamp)
+```

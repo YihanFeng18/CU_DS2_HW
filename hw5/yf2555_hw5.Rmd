@@ -1,0 +1,26 @@
+---
+title: "Assignment 5"
+author: "Yihan Feng"
+date: "4/21/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ISLR)
+```
+
+This problem involves the OJ data set which is part of the ISLR package. The data contains 1070 purchases where the customer either purchased Citrus Hill or Minute Maid Orange Juice. A number of characteristics of the customer and product are recorded. Create a training set containing a random sample of 800 observations, and a test set containing the
+remaining observations.
+
+```{r}
+data(OJ)
+oj.df = OJ %>%
+  janitor::clean_names()
+```
+
+
+#### (a) Fit a support vector classifier (linear kernel) to the training data with Purchase as the response and the other variables as predictors. What are the training and test error rates?
+
+#### (b) Fit a support vector machine with a radial kernel to the training data. What are the training and test error rates?

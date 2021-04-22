@@ -1,0 +1,143 @@
+---
+title: "P8106 Assignment 1"
+author: "Yihan Feng"
+date: "2/14/2021"
+output: pdf_document
+---
+
+### Set up libraries
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(pls)
+
+```
+
+<br>
+<br>
+
+### Data import and set up
+```{r message=FALSE, warning=FALSE}
+set.seed(888)
+
+setwd("C:/Users/irene/OneDrive - cumc.columbia.edu/2021 M1 Spring/Data Science 2/HW/hw1/p8106_hw1_yf2555/dataset")
+train = read_csv("./solubility_train.csv")
+test = read_csv("./solubility_test.csv")
+
+train_x = model.matrix(Solubility ~ ., train)[,-1]
+train_y = train$Solubility
+
+test_x = model.matrix(Solubility ~ ., test)[,-1]
+test_y = test$Solubility
+
+ctrl = trainControl(method = "repeatedcv", number = 10, repeats = 5)
+```
+
+<br>
+<br>
+
+### a. Least Squares
+
+```{r message=FALSE, warning=FALSE}
+set.seed(888)
+lm.fit = train(train_x, train_y,
+               method = "lm",
+               trControl = ctrl)
+
+pred.lm = predict(lm.fit, newdata = test_x)
+rmse.lm = RMSE(test_y, pred.lm)
+```
+The mean squared error is `r round(rmse.lm, 3)`. 
+
+<br>
+<br>
+
+### b. Ridge Regression
+
+```{r message=FALSE, warning=FALSE}
+set.seed(888)
+ridge.fit = train(train_x, train_y,
+               method = "glmnet",
+               tuneGrid = expand.grid(alpha = 0,
+                                      lambda = exp(seq(-5, 10, length = 100))),
+               preProc = c("center", "scale"),
+               trControl = ctrl)
+
+ridge.fit$bestTune
+
+pred.ridge = predict(ridge.fit, newdata = test_x)
+rmse.ridge = RMSE(test_y, pred.ridge)
+
+plot(ridge.fit, xTrans = log)
+```
+The $\lambda$ chosen by cross-validation is 0.126. 
+The test error is `r round(rmse.ridge, 3)`. 
+
+<br>
+<br>
+
+### c. Lasso Regression
+
+```{r message=FALSE, warning=FALSE}
+set.seed(888)
+lasso.fit = train(train_x, train_y,
+               method = "glmnet",
+               tuneGrid = expand.grid(alpha = 1,
+                                      lambda = exp(seq(-6, 2, length = 100))),
+               preProc = c("center", "scale"),
+               trControl = ctrl)
+lasso.fit$bestTune
+
+pred.lasso = predict(lasso.fit, newdata = test_x)
+rmse.lasso = RMSE(test_y, pred.lasso)
+
+non_zero = coef(lasso.fit$finalModel, s = lasso.fit$bestTune$lambda) != 0
+
+plot(lasso.fit, xTrans = log)
+
+```
+The $\lambda$ chosen by cross-validation is 0.0047.
+The test error is `r round(rmse.lasso, 3)`. 
+The number of non-zero coefficient estimates in the model is `r sum(non_zero)`. 
+
+<br>
+<br>
+
+### d. PCR
+
+```{r message=FALSE, warning=FALSE}
+set.seed(888)
+pcr.fit = train(train_x, train_y,
+               method = "pcr",
+               tuneGrid = data.frame(ncomp = 1:226),
+               tuneLength = length(train),
+               preProc = c("center", "scale"),
+               trControl = ctrl)
+
+pcr.fit$bestTune
+
+pred.pcr = predict(pcr.fit, newdata = test_x)
+rmse.pcr = RMSE(test_y, pred.pcr)
+
+validationplot(pcr.fit$finalModel, val.type = "MSEP")
+
+```
+The M chosen by cross-validation is 157.
+The test error is `r round(rmse.pcr, 3)`. 
+
+<br>
+<br>
+
+### e. Model selection
+
+```{r message=FALSE, warning=FALSE}
+set.seed(888)
+resample = resamples(list(lm = lm.fit,
+                          ridge = ridge.fit,
+                          lasso = lasso.fit,
+                          pcr = pcr.fit))
+summary(resample)
+bwplot(resample, metric = "RMSE")
+```
+Based on the resample summary, I would choose Lasso regression, because it has the lowest mean MAE and RMSE, as well as the highest Rsquared. 

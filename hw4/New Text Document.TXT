@@ -1,0 +1,5 @@
+https://github.com/zl2974/p8106_hw1/blob/master/homework4.Rmd
+https://github.com/NatLab1/p8106_hw4/blob/master/p8106_hw4.Rmd
+https://github.com/antibaseR/P8106_hw4/blob/master/P8106_hw4.pdf
+https://github.com/zz2603/P8106_HW4/blob/master/P8016_HW4_zz2603.Rmd
+

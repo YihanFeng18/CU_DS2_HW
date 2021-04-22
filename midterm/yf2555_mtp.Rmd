@@ -1,0 +1,243 @@
+---
+title: "midterm project"
+author: "Yihan Feng"
+date: "2021/3/24"
+output: html_document
+---
+
+```{r, include=FALSE}
+setwd("C:/Users/irene/OneDrive - cumc.columbia.edu/2021 M1 Spring/Data Science 2/HW/midterm")
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(arsenal)
+library(forcats)
+library(nlme)
+library(mgcv)
+library(MASS)
+library(mlbench)
+library(pROC)
+library(klaR)
+library(gridExtra)
+library(wrapr)
+```
+
+
+## Data import and cleaning
+
+```{r, message=FALSE, warning=FALSE}
+pkmn.df = read.csv("./pokemon.csv") %>%
+  janitor::clean_names() %>%
+  dplyr::select(-number) #meaningless or too many missing values
+
+# remove the one with wrong data entry
+pkmn.df = pkmn.df[-32,]
+
+# calculated that the total is the sum of other features
+total.cal = pkmn.df %>%
+  dplyr::select(total, hp, attack, defense, sp_atk, sp_def, speed) %>%
+  mutate(total.calculated = hp + attack + defense + sp_atk + sp_def + speed,
+         total.0 = total - total.calculated)
+unique(total.cal$total.0)
+
+# number of rows and variables
+nrow(pkmn.df)
+ncol(pkmn.df)
+sum(pkmn.df$is_legendary == "True")
+
+```
+
+
+-------------------------------------------------------------------------------------------------------
+
+## Visualization
+
+
+### Contingency table
+
+```{r, results="asis"}
+# look for overall relationships between legendary and non-legendary Pokemons
+
+my_controls <- tableby.control(
+               total = TRUE,
+               test = FALSE, 
+               numeric.stats = c("meansd", "medianq1q3"),  
+               cat.stats = c("countpct"),                            
+               stats.labels = list(
+               meansd = "Mean (SD)",
+               medianq1q3 = "Median (Q1, Q3)",
+               countpct = "N (%)"))
+
+descriptive.table = tableby(is_legendary ~ type_1 + type_2 + total + hp + attack + defense + sp_atk + sp_def + speed + generation + color + has_gender + pr_male + egg_group_1 + egg_group_2 + has_mega_evolution + height_m + weight_kg + catch_rate + body_style,
+                            data = pkmn.df,
+                            control = my_controls)
+summary(descriptive.table, 
+        digits = 1,
+        caption = "Figure 1. Contingency Table for Legendary and Non-legendary Pokemon")
+```
+
+
+
+### Total
+
+```{r}
+total.plot = ggplot(pkmn.df, aes(x = total, fill = is_legendary)) + 
+  geom_histogram(binwidth = 30) +
+  labs(title = "Figure 2. Histogram of total battle feature among legendary or non-legendary Pokemon") +
+  ggsave("figure2.jpg", width = 10, height = 10)
+```
+
+
+### HP, Attack, Defense, Speed, Sp_attack, Sp_defense among legendary
+
+```{r}
+pkmn.features = pkmn.df %>%
+  dplyr::select(name, is_legendary, hp, attack, defense, sp_atk, sp_def, speed) %>%
+  pivot_longer(hp : speed,
+               names_to = "features",
+               values_to = "values")
+
+features.plot = pkmn.features %>%
+  ggplot(aes(x = values, fill = is_legendary)) + 
+  geom_histogram() + 
+  facet_grid(. ~ features) + 
+  facet_wrap(~ features, nrow = 3) + 
+  labs(title = "Figure 3. Histogram of 6 Features among legendary or non-legendary Pokemon") +
+  ggsave("figure3.jpg", width = 10, height = 10)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##  Models
+
+### Set up
+```{r}
+train.df = pkmn.df %>%
+  dplyr::select(is_legendary, total, has_gender, has_mega_evolution, height_m, weight_kg, catch_rate) %>%
+  mutate(is_legendary = as.factor(is_legendary),
+         has_gender = as.factor(has_gender),
+         has_mega_evolution = as.factor(has_mega_evolution),
+         catch_rate = as.numeric(catch_rate),
+         total = as.numeric(total))
+
+train.df$gender = 0
+train.df$gender[train.df$has_gender == "True"] = 1
+train.df$mega = 0
+train.df$mega[train.df$has_mega_evolution == "True"] = 1
+
+train.df = train.df %>%
+  dplyr::select(-has_gender, -has_mega_evolution)
+
+
+rowTrain = createDataPartition(y = train.df$is_legendary,
+                               p = 0.7, 
+                               list = FALSE)
+
+control = trainControl(method = "cv",
+                       summaryFunction = twoClassSummary,
+                       classProbs = TRUE)
+
+str(train.df)
+```
+
+
+### GAM
+```{r message=FALSE, warning=FALSE}
+gam.fit = train(x = train.df[rowTrain, 2:7],
+                y = train.df$is_legendary[rowTrain],
+                method = "gam", 
+                metric = "ROC",
+                trControl = control)
+```
+
+
+### LDA
+```{r}
+lda.fit = train(x = train.df[rowTrain, 2:7],
+                y = train.df$is_legendary[rowTrain],
+                method = "lda",
+                metric = "ROC",
+                trControl = control)
+```
+
+### QDA
+```{r}
+qda.fit = train(x = train.df[rowTrain, 2:7],
+                 y = train.df$is_legendary[rowTrain],
+                 method = "qda",
+                 metric = "ROC",
+                 trControl = control)
+```
+
+### NB
+```{r, message=FALSE, warning=FALSE}
+nb.fit = train(x = train.df[rowTrain, 2:6],
+                y = train.df$is_legendary[rowTrain],
+                method = "nb",
+                tuneGrid = expand.grid(usekernel = c("No", "Yes"),
+                                       fL = 2,
+                                       adjust = seq(0, 2, by = 0.2)),
+                metric = "ROC",
+                trControl = control)
+```
+
+### Compare Models
+```{r}
+resample = resamples(list(GAM = gam.fit,
+                          LDA = lda.fit,
+                          QDA = qda.fit,
+                          NB = nb.fit))
+summary(resample)
+```
+
+
+
+
+## Test Data Performance
+```{r}
+gam.pred = predict(gam.fit, newdata = train.df[-rowTrain,], type = "prob")
+lda.pred = predict(lda.fit, newdata = train.df[-rowTrain,], type = "prob")
+qda.pred = predict(qda.fit, newdata = train.df[-rowTrain,], type = "prob")
+nb.pred = predict(nb.fit, newdata = train.df[-rowTrain,], type = "prob")
+
+
+gam.roc = roc(train.df$is_legendary[-rowTrain], gam.pred[,2],
+              levels = c("False", "True"))
+lda.roc = roc(train.df$is_legendary[-rowTrain], lda.pred[,2],
+              levels = c("False", "True"))
+qda.roc = roc(train.df$is_legendary[-rowTrain], qda.pred[,2],
+              levels = c("False", "True"))
+nb.roc = roc(train.df$is_legendary[-rowTrain], nb.pred[,2],
+              levels = c("False", "True"))
+
+auc = c(gam.roc$auc[1], 
+        lda.roc$auc[1],
+        qda.roc$auc[1], 
+        nb.roc$auc[1])
+
+plot(gam.roc, legacy.axes = TRUE)
+plot(lda.roc, col = 3, add = TRUE)
+plot(qda.roc, col = 4, add = TRUE)
+plot(nb.roc, col = 5, add = TRUE)
+
+modelNames <- c("GAM", "LDA","QDA","NB")
+legend("bottomright", legend = paste0(modelNames, ": ", round(auc,3)),
+col = 1:4, lwd = 2)
+```
+
+
